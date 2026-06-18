@@ -401,36 +401,30 @@
     fetchData(input);
   }
 
-  async function fetchData(searchQuery) {
+ async function fetchData(searchQuery) {
     try {
       const qVal = searchQuery.trim();
-      const qEncoded = encodeURIComponent(qVal);
-      const qUpperEncoded = encodeURIComponent(qVal.toUpperCase());
-      const qNoSpaceEncoded = encodeURIComponent(qVal.replace(/\s+/g, ''));
+      const qUpper = qVal.toUpperCase();
+      const qNoSpace = qVal.replace(/\s+/g, '');
       
       let rows = [];
 
-      // 1. Exact Match Ticket
-      rows = await sbFetch(`operix_invoices?op_id=eq.${qUpperEncoded}&limit=1`, { method: 'GET' });
+      // 1. Exact Match: Physical Card / Ticket Number (card_num)
+      rows = await sbFetch(`operix_invoices?card_num=eq.${encodeURIComponent(qVal)}&limit=1`, { method: 'GET' });
       
-      // 2. Partial Match Ticket (Fix: If they typed numbers without OPX-)
+      // 2. Exact Match: Internal Reference (op_id)
       if (!rows || rows.length === 0) {
-        rows = await sbFetch(`operix_invoices?op_id=ilike.*${qEncoded}*&limit=1`, { method: 'GET' });
+        rows = await sbFetch(`operix_invoices?op_id=eq.${encodeURIComponent(qUpper)}&limit=1`, { method: 'GET' });
       }
 
-      // 3. Exact Match Plate
+      // 3. Exact Match: Plate Number
       if (!rows || rows.length === 0) {
-        rows = await sbFetch(`operix_invoices?plate_num=eq.${qUpperEncoded}&limit=1`, { method: 'GET' });
+        rows = await sbFetch(`operix_invoices?plate_num=eq.${encodeURIComponent(qUpper)}&limit=1`, { method: 'GET' });
       }
 
-      // 4. Partial Match Plate (allows case-insensitive matches)
+      // 4. Partial Match: Plate Number (ignores spaces)
       if (!rows || rows.length === 0) {
-        rows = await sbFetch(`operix_invoices?plate_num=ilike.*${qEncoded}*&limit=1`, { method: 'GET' });
-      }
-
-      // 5. Partial Match Plate (ignores spaces if user typed without spaces)
-      if (!rows || rows.length === 0) {
-        rows = await sbFetch(`operix_invoices?plate_num=ilike.*${qNoSpaceEncoded}*&limit=1`, { method: 'GET' });
+        rows = await sbFetch(`operix_invoices?plate_num=ilike.*${encodeURIComponent(qNoSpace)}*&limit=1`, { method: 'GET' });
       }
       
       if (Array.isArray(rows) && rows.length > 0) {
@@ -449,7 +443,6 @@
       `;
     }
   }
-
   function updateUI() {
     showState('content');
 
