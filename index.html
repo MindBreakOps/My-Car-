@@ -339,204 +339,230 @@
   const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx6b2JkcWxic3hqbHVweWV3ZHFxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5OTY0MDQsImV4cCI6MjA4OTU3MjQwNH0.fH-bV3QiQUbk_6L-clwwdHlZTnTIYAIJeKysMhUlBIs';
 
   async function sbFetch(path, opts={}) {
-	const res = await fetch(SUPABASE_URL + '/rest/v1/' + path, {
-	  ...opts,
-	  headers: {
-		'Content-Type': 'application/json',
-		'apikey': SUPABASE_ANON,
-		'Authorization': 'Bearer ' + SUPABASE_ANON,
-		'Prefer': 'return=representation',
-		...(opts.headers||{})
-	  }
-	});
-	if(!res.ok) throw new Error('Network Error');
-	const text = await res.text();
-	return text ? JSON.parse(text) : [];
+    const res = await fetch(SUPABASE_URL + '/rest/v1/' + path, {
+      ...opts,
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_ANON,
+        'Authorization': 'Bearer ' + SUPABASE_ANON,
+        'Prefer': 'return=representation',
+        ...(opts.headers||{})
+      }
+    });
+    if(!res.ok) throw new Error('Network Error');
+    const text = await res.text();
+    return text ? JSON.parse(text) : [];
   }
 
   let ticketData = null;
   let pollInterval = null;
 
   window.onload = () => {
-	const params = new URLSearchParams(window.location.search);
-	const query = params.get('q') || params.get('ticket');
-	
-	if(query) {
-	  document.getElementById('search-input').value = query;
-	  executeSearch(query);
-	} else {
-	  showState('search');
-	}
+    const params = new URLSearchParams(window.location.search);
+    const query = params.get('q') || params.get('ticket');
+    
+    if(query) {
+      document.getElementById('search-input').value = query;
+      executeSearch(query);
+    } else {
+      showState('search');
+    }
   };
 
   function showState(state) {
-	document.getElementById('search-state').style.display = state === 'search' ? 'block' : 'none';
-	document.getElementById('loading-state').style.display = state === 'loading' ? 'block' : 'none';
-	document.getElementById('content-state').style.display = state === 'content' ? 'flex' : 'none';
+    document.getElementById('search-state').style.display = state === 'search' ? 'block' : 'none';
+    document.getElementById('loading-state').style.display = state === 'loading' ? 'block' : 'none';
+    document.getElementById('content-state').style.display = state === 'content' ? 'flex' : 'none';
   }
 
   function resetSearch() {
-	if(pollInterval) clearInterval(pollInterval);
-	ticketData = null;
-	const url = new URL(window.location);
-	url.searchParams.delete('q');
-	url.searchParams.delete('ticket');
-	window.history.pushState({}, '', url);
-	document.getElementById('search-input').value = '';
-	showState('search');
+    if(pollInterval) clearInterval(pollInterval);
+    ticketData = null;
+    const url = new URL(window.location);
+    url.searchParams.delete('q');
+    url.searchParams.delete('ticket');
+    window.history.pushState({}, '', url);
+    document.getElementById('search-input').value = '';
+    showState('search');
   }
 
   function executeSearch(queryOverride) {
-	const input = queryOverride || document.getElementById('search-input').value.trim().toUpperCase();
-	if(!input) {
-	  alert('الرجاء إدخال رقم التذكرة أو اللوحة.');
-	  return;
-	}
-	
-	const url = new URL(window.location);
-	url.searchParams.set('q', input);
-	window.history.pushState({}, '', url);
+    const input = queryOverride || document.getElementById('search-input').value.trim();
+    if(!input) {
+      alert('الرجاء إدخال رقم التذكرة أو اللوحة.');
+      return;
+    }
+    
+    const url = new URL(window.location);
+    url.searchParams.set('q', input);
+    window.history.pushState({}, '', url);
 
-	showState('loading');
-	fetchData(input);
+    showState('loading');
+    fetchData(input);
   }
 
   async function fetchData(searchQuery) {
-	try {
-	  const qVal = encodeURIComponent(searchQuery.trim());
-	  let rows = [];
+    try {
+      const qVal = searchQuery.trim();
+      const qEncoded = encodeURIComponent(qVal);
+      const qUpperEncoded = encodeURIComponent(qVal.toUpperCase());
+      const qNoSpaceEncoded = encodeURIComponent(qVal.replace(/\s+/g, ''));
+      
+      let rows = [];
 
-	  // 1. البحث برقم التذكرة
-	  rows = await sbFetch(`operix_invoices?op_id=eq.${qVal}&limit=1`, { method: 'GET' });
-	  
-	  // 2. البحث برقم اللوحة (دقيق)
-	  if (!Array.isArray(rows) || rows.length === 0) {
-		rows = await sbFetch(`operix_invoices?plate_num=eq.${qVal}&limit=1`, { method: 'GET' });
-	  }
+      // 1. Exact Match Ticket
+      rows = await sbFetch(`operix_invoices?op_id=eq.${qUpperEncoded}&limit=1`, { method: 'GET' });
+      
+      // 2. Partial Match Ticket (Fix: If they typed numbers without OPX-)
+      if (!rows || rows.length === 0) {
+        rows = await sbFetch(`operix_invoices?op_id=ilike.*${qEncoded}*&limit=1`, { method: 'GET' });
+      }
 
-	  // 3. البحث برقم اللوحة (تقريبي)
-	  if (!Array.isArray(rows) || rows.length === 0) {
-		rows = await sbFetch(`operix_invoices?plate_num=ilike.*${qVal}*&limit=1`, { method: 'GET' });
-	  }
-	  
-	  if (Array.isArray(rows) && rows.length > 0) {
-		ticketData = rows[0];
-		updateUI();
-	  } else {
-		document.getElementById('loading-state').innerHTML = `
-		  <div style="color:var(--text-muted); font-weight:700; margin-bottom: 20px;">لم نتمكن من العثور على التذكرة أو اللوحة (${searchQuery})</div>
-		  <button onclick="resetSearch()" class="btn-primary" style="padding: 12px 24px; width: auto; margin: 0 auto; background: var(--navy);">رجوع للبحث</button>
-		`;
-	  }
-	} catch(e) {
-	  document.getElementById('loading-state').innerHTML = `
-		<div style="color:var(--warning); font-weight:700; margin-bottom: 20px;">حدث خطأ في الاتصال بالخادم.</div>
-		<button onclick="location.reload()" class="btn-primary" style="padding: 12px 24px; width: auto; margin: 0 auto;">تحديث الصفحة</button>
-	  `;
-	}
+      // 3. Exact Match Plate
+      if (!rows || rows.length === 0) {
+        rows = await sbFetch(`operix_invoices?plate_num=eq.${qUpperEncoded}&limit=1`, { method: 'GET' });
+      }
+
+      // 4. Partial Match Plate (allows case-insensitive matches)
+      if (!rows || rows.length === 0) {
+        rows = await sbFetch(`operix_invoices?plate_num=ilike.*${qEncoded}*&limit=1`, { method: 'GET' });
+      }
+
+      // 5. Partial Match Plate (ignores spaces if user typed without spaces)
+      if (!rows || rows.length === 0) {
+        rows = await sbFetch(`operix_invoices?plate_num=ilike.*${qNoSpaceEncoded}*&limit=1`, { method: 'GET' });
+      }
+      
+      if (Array.isArray(rows) && rows.length > 0) {
+        ticketData = rows[0];
+        updateUI();
+      } else {
+        document.getElementById('loading-state').innerHTML = `
+          <div style="color:var(--text-muted); font-weight:700; margin-bottom: 20px;">لم نتمكن من العثور على التذكرة أو اللوحة (${searchQuery})</div>
+          <button onclick="resetSearch()" class="btn-primary" style="padding: 12px 24px; width: auto; margin: 0 auto; background: var(--navy);">رجوع للبحث</button>
+        `;
+      }
+    } catch(e) {
+      document.getElementById('loading-state').innerHTML = `
+        <div style="color:var(--warning); font-weight:700; margin-bottom: 20px;">حدث خطأ في الاتصال بالخادم.</div>
+        <button onclick="location.reload()" class="btn-primary" style="padding: 12px 24px; width: auto; margin: 0 auto;">تحديث الصفحة</button>
+      `;
+    }
   }
 
   function updateUI() {
-	showState('content');
+    showState('content');
 
-	document.getElementById('display-ticket-no').innerText = ticketData.op_id || '---';
-	document.getElementById('display-plate').innerText = ticketData.plate_num || '---';
+    document.getElementById('display-ticket-no').innerText = ticketData.op_id || '---';
+    document.getElementById('display-plate').innerText = ticketData.plate_num || '---';
 
-	const statusBadge = document.getElementById('display-status');
-	const statusIcon = document.getElementById('status-icon');
-	const statusText = document.getElementById('status-text');
-	const btnRequest = document.getElementById('btn-request');
-	const paymentSection = document.getElementById('payment-section');
-	
-	const amount = parseFloat(ticketData.amount) || 0;
-	if(ticketData.service_type === 'Free' || amount === 0) {
-	  paymentSection.style.display = 'none';
-	} else {
-	  paymentSection.style.display = 'block';
-	  document.getElementById('display-fee').innerText = amount.toFixed(2) + ' SAR';
-	}
+    const statusBadge = document.getElementById('display-status');
+    const statusIcon = document.getElementById('status-icon');
+    const statusText = document.getElementById('status-text');
+    const btnRequest = document.getElementById('btn-request');
+    const paymentSection = document.getElementById('payment-section');
+    
+    const amount = parseFloat(ticketData.amount) || 0;
+    if(ticketData.service_type === 'Free' || amount === 0) {
+      paymentSection.style.display = 'none';
+    } else {
+      paymentSection.style.display = 'block';
+      document.getElementById('display-fee').innerText = amount.toFixed(2) + ' SAR';
+    }
 
-	statusBadge.className = 'status-badge';
-	const currentStatus = ticketData.vehicle_status || 'Parked';
+    statusBadge.className = 'status-badge';
+    const currentStatus = ticketData.vehicle_status || 'Parked';
 
-	if (currentStatus === 'Parked') {
-	  statusBadge.classList.add('status-parked');
-	  statusIcon.innerHTML = '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>';
-	  statusText.innerText = 'في المواقف (أمان)';
-	  
-	  btnRequest.disabled = false;
-	  btnRequest.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg><span>استدعاء سيارتي الآن</span>';
-	  
-	  if(pollInterval) clearInterval(pollInterval);
-	  
-	} else if (currentStatus === 'Requested') {
-	  statusBadge.classList.add('status-requested');
-	  statusIcon.innerHTML = '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>';
-	  statusText.innerText = 'جاري إحضار السيارة...';
-	  
-	  btnRequest.disabled = true;
-	  btnRequest.innerHTML = '<div class="loader" style="color:var(--text-muted);"></div><span>السيارة في الطريق إليك</span>';
-	  
-	  startPolling();
+    if (currentStatus === 'Parked' || currentStatus === 'Occupied') {
+      statusBadge.classList.add('status-parked');
+      statusIcon.innerHTML = '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>';
+      statusText.innerText = 'في المواقف (أمان)';
+      
+      btnRequest.disabled = false;
+      btnRequest.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg><span>استدعاء سيارتي الآن</span>';
+      
+      if(pollInterval) clearInterval(pollInterval);
+      
+    } else if (currentStatus === 'Requested') {
+      statusBadge.classList.add('status-requested');
+      statusIcon.innerHTML = '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>';
+      statusText.innerText = 'جاري إحضار السيارة...';
+      
+      btnRequest.disabled = true;
+      btnRequest.innerHTML = '<div class="loader" style="color:var(--text-muted);"></div><span>السيارة في الطريق إليك</span>';
+      
+      startPolling();
 
-	} else if (currentStatus === 'Returned') {
-	  statusBadge.classList.add('status-returned');
-	  statusIcon.innerHTML = '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>';
-	  statusText.innerText = 'تم تسليم السيارة';
-	  
-	  paymentSection.style.display = 'none';
-	  btnRequest.disabled = true;
-	  btnRequest.innerHTML = '<span>تم إغلاق التذكرة</span>';
-	  
-	  if(pollInterval) clearInterval(pollInterval);
-	}
+    } else if (currentStatus === 'Returned' || currentStatus === 'Completed') {
+      statusBadge.classList.add('status-returned');
+      statusIcon.innerHTML = '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>';
+      statusText.innerText = 'تم تسليم السيارة';
+      
+      paymentSection.style.display = 'none';
+      btnRequest.disabled = true;
+      btnRequest.innerHTML = '<span>تم إغلاق التذكرة</span>';
+      
+      if(pollInterval) clearInterval(pollInterval);
+      
+    } else if (currentStatus === 'In Progress') {
+      statusBadge.classList.add('status-requested');
+      statusBadge.style.background = 'var(--info-bg)';
+      statusBadge.style.color = 'var(--info)';
+      statusBadge.style.borderColor = 'rgba(59, 130, 246, 0.2)';
+      statusIcon.innerHTML = '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>';
+      statusText.innerText = 'السيارة في طريقها إليك';
+      
+      btnRequest.disabled = true;
+      btnRequest.innerHTML = '<div class="loader" style="color:var(--text-muted);"></div><span>السائق في الطريق</span>';
+      
+      startPolling();
+    }
   }
 
   async function requestCar() {
-	const btn = document.getElementById('btn-request');
-	btn.disabled = true;
-	btn.innerHTML = '<div class="loader" style="color:var(--text-muted);"></div><span>جاري إرسال الطلب...</span>';
+    const btn = document.getElementById('btn-request');
+    btn.disabled = true;
+    btn.innerHTML = '<div class="loader" style="color:var(--text-muted);"></div><span>جاري إرسال الطلب...</span>';
 
-	try {
-	  const now = new Date().toISOString();
-	  await sbFetch(`operix_invoices?id=eq.${ticketData.id}`, {
-		method: 'PATCH',
-		body: JSON.stringify({ 
-		  vehicle_status: 'Requested',
-		  requested_at: now 
-		}),
-	  });
+    try {
+      // FIX: Removed "requested_at" from payload to prevent Supabase 400 crash
+      await sbFetch(`operix_invoices?id=eq.${ticketData.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ 
+          vehicle_status: 'Requested'
+        }),
+      });
 
-	  ticketData.vehicle_status = 'Requested';
-	  updateUI();
-	} catch(e) {
-	  alert('حدث خطأ. يرجى المحاولة مرة أخرى.');
-	  updateUI();
-	}
+      ticketData.vehicle_status = 'Requested';
+      updateUI();
+    } catch(e) {
+      alert('حدث خطأ. يرجى المحاولة مرة أخرى.');
+      updateUI();
+    }
   }
 
   function startPolling() {
-	if(pollInterval) clearInterval(pollInterval);
-	pollInterval = setInterval(async () => {
-	  try {
-		const rows = await sbFetch(`operix_invoices?id=eq.${ticketData.id}&select=vehicle_status`, { method: 'GET' });
-		if (rows && rows.length > 0) {
-		  const liveStatus = rows[0].vehicle_status;
-		  if (liveStatus !== ticketData.vehicle_status) {
-			ticketData.vehicle_status = liveStatus;
-			updateUI();
-		  }
-		}
-	  } catch(e) {}
-	}, 5000);
+    if(pollInterval) clearInterval(pollInterval);
+    pollInterval = setInterval(async () => {
+      try {
+        const rows = await sbFetch(`operix_invoices?id=eq.${ticketData.id}&select=vehicle_status`, { method: 'GET' });
+        if (rows && rows.length > 0) {
+          const liveStatus = rows[0].vehicle_status;
+          if (liveStatus !== ticketData.vehicle_status) {
+            ticketData.vehicle_status = liveStatus;
+            updateUI();
+          }
+        }
+      } catch(e) {}
+    }, 5000);
   }
 
   function copyText(text) {
-	navigator.clipboard.writeText(text).then(() => {
-	  const toast = document.getElementById('toast');
-	  toast.classList.add('show');
-	  setTimeout(() => toast.classList.remove('show'), 2500);
-	});
+    navigator.clipboard.writeText(text).then(() => {
+      const toast = document.getElementById('toast');
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2500);
+    });
   }
 </script>
 
